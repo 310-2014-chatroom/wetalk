@@ -11,6 +11,9 @@ import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 import java.awt.event.WindowAdapter;
 import java.awt.event.WindowEvent;
+import java.io.IOException;
+import java.net.ServerSocket;
+import java.net.Socket;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Queue;
@@ -40,6 +43,7 @@ import org.slf4j.LoggerFactory;
 
 import usermanager.User;
 import wetalk.WeTalkDownPart;
+import File.FileReceive;
 
 
 public class ChatFrameMain extends JFrame {
@@ -218,10 +222,9 @@ public class ChatFrameMain extends JFrame {
 	            	}
 	            }
 	        });
-	        timer.start();	  
-	        
+	        timer.start();	  	        
 	        //下面一行代码用于测试闪烁
-	        putMsgUser(ME);
+	        //putMsgUser(ME);
 		}
 	}
 	
@@ -277,6 +280,33 @@ public class ChatFrameMain extends JFrame {
 		
 	}	
 
+	////////////////////
+	//文件传输
+	///////////////////
+	protected class FileHandler extends Thread {
+		public void run(){
+			ServerSocket ss = null;
+			Socket s = null;
+			final int FILEPORT = 4567;
+			
+				try {
+					ss = new ServerSocket(FILEPORT);
+				} catch (IOException e1) {
+					e1.printStackTrace();
+				}
+				log.info("file server is working.");
+				
+				while(true){	  
+					try {
+						s = ss.accept();
+						FileReceive filereceive = new FileReceive(s);
+						threadpool.submit(filereceive);	
+					} catch (IOException e) {
+						e.printStackTrace();
+					} 
+				}
+		}
+	}
 	
 	//主窗口退出，程序结束。
 	protected void mainFrameExiting(WindowEvent e){
@@ -322,6 +352,10 @@ public class ChatFrameMain extends JFrame {
 		
 		Thread receiver = new Receiver();
 		threadpool.submit(receiver);
+		
+		Thread fileHandler = new FileHandler();
+		threadpool.submit(fileHandler);
+		
 		return;
 	}
 	

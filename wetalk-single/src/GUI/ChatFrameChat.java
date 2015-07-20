@@ -1,37 +1,36 @@
 package GUI;
 
 import java.awt.BorderLayout;
+import java.awt.Color;
 import java.awt.Dimension;
-import java.awt.EventQueue;
+import java.awt.Font;
+import java.awt.SystemColor;
+import java.awt.Toolkit;
+import java.awt.event.ActionEvent;
+import java.awt.event.KeyAdapter;
+import java.awt.event.KeyEvent;
+import java.awt.event.MouseAdapter;
+import java.awt.event.MouseEvent;
+import java.io.File;
+import java.net.DatagramPacket;
+import java.net.DatagramSocket;
+import java.util.Map;
 
+import javax.swing.AbstractAction;
+import javax.swing.Action;
+import javax.swing.JButton;
+import javax.swing.JFileChooser;
 import javax.swing.JFrame;
 import javax.swing.JLabel;
 import javax.swing.JLayeredPane;
 import javax.swing.JPanel;
+import javax.swing.JScrollPane;
+import javax.swing.JTextArea;
+import javax.swing.JTextField;
 import javax.swing.border.EmptyBorder;
 
 import usermanager.User;
-import wetalk.WeTalkDownPart;
-
-import java.awt.Toolkit;
-
-import javax.swing.JButton;
-import javax.swing.JTextArea;
-import javax.swing.JTextField;
-
-import java.awt.Color;
-
-import javax.swing.JScrollPane;
-
-import java.awt.Font;
-import java.awt.event.MouseAdapter;
-import java.awt.event.MouseEvent;
-import java.awt.event.KeyAdapter;
-import java.awt.event.KeyEvent;
-import java.net.DatagramPacket;
-import java.net.DatagramSocket;
-import java.util.Map;
-import java.awt.SystemColor;
+import File.FileSend;
 
 public class ChatFrameChat extends JFrame {
 	User ME;
@@ -45,6 +44,7 @@ public class ChatFrameChat extends JFrame {
 	private JPanel contentPane;
 	private JTextField textField;
 	private JTextArea textArea;
+	private final Action action = new SwingAction();
 
 	/**
 	 * Create the frame.
@@ -124,6 +124,17 @@ public class ChatFrameChat extends JFrame {
 		textArea.setForeground(new Color(0, 0, 102));
 		textArea.setEditable(false);
 		scrollPane.setViewportView(textArea);
+		
+		JButton btnNewButton = new JButton("发送文件");
+		btnNewButton.addMouseListener(new MouseAdapter() {
+			@Override
+			public void mouseClicked(MouseEvent e) {
+				sendFilebutton_event(e);
+			}
+		});
+		btnNewButton.setAction(action);
+		btnNewButton.setBounds(390, 10, 93, 38);
+		layeredPane.add(btnNewButton);
 	}
 	
 	//发送消息事件处理
@@ -164,4 +175,25 @@ public class ChatFrameChat extends JFrame {
 		}
 	}
 	
+	//select sendfile
+	void sendFilebutton_event(MouseEvent e){
+		File sendfile = null;
+		JFileChooser chooser = new JFileChooser();//初始化文件选择框
+		chooser.setDialogTitle("请选择文件");//设置文件选择框的标题 
+		int result =chooser.showOpenDialog(null);//弹出选择框
+		if(JFileChooser.APPROVE_OPTION == result){
+			sendfile = chooser.getSelectedFile();
+			FileSend filesender = new FileSend(this.PEER.getIPAddress(), sendfile);
+			filesender.start();
+		}
+	}
+	
+	private class SwingAction extends AbstractAction {
+		public SwingAction() {
+			putValue(NAME, "发送文件");
+			putValue(SHORT_DESCRIPTION, "Some short description");
+		}
+		public void actionPerformed(ActionEvent e) {
+		}
+	}
 }
