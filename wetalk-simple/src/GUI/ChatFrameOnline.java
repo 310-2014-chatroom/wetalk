@@ -121,7 +121,8 @@ public class ChatFrameOnline extends JFrame {
 				//用户上线，显示主窗口
 				this.setVisible(false);		
 			
-				WeTalkDownPart.Start(comeQueue, goQueue, me);
+				WeTalkDownPart down = new WeTalkDownPart(comeQueue, goQueue, me);
+				down.start();
 			
 				log.info("show main frame.");
 				ChatFrameMain.showFrameMain(comeQueue, goQueue,me);
