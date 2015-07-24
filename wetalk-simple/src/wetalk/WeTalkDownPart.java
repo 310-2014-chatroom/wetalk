@@ -119,6 +119,8 @@ import usermanager.User;
 						goQueue.add(peer);	//添加到come队列中 
 						log.info("a user left:{}",peer.toString());
 						break;
+					default:
+						break;
 
 					}
 				} catch(Exception e) {
@@ -130,6 +132,11 @@ import usermanager.User;
 			//线程退出
 			log.info("Down Part exit.");
 			System.exit(0);		
+		}
+		
+		public static void Start(Queue<User> comequeue, Queue<User> goqueue, User me){
+			WeTalkDownPart down = new WeTalkDownPart(comequeue, goqueue, me);
+			down.start();			
 		}
 		
 		//用户下线。当前台退出时，后台发生送下线广播

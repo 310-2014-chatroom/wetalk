@@ -1,58 +1,81 @@
 package GUI;
 
 import java.awt.BorderLayout;
+import java.awt.Color;
 import java.awt.Dimension;
-import java.awt.EventQueue;
+import java.awt.Font;
+import java.awt.SystemColor;
+import java.awt.Toolkit;
+import java.awt.event.ActionEvent;
+import java.awt.event.KeyAdapter;
+import java.awt.event.KeyEvent;
+import java.awt.event.MouseAdapter;
+import java.awt.event.MouseEvent;
+import java.io.File;
+import java.io.IOException;
+import java.net.DatagramPacket;
+import java.net.DatagramSocket;
+import java.net.InetAddress;
+import java.util.Iterator;
+import java.util.Map;
+import java.util.Queue;
 
+import javax.swing.AbstractAction;
+import javax.swing.Action;
+import javax.swing.JButton;
+import javax.swing.JFileChooser;
 import javax.swing.JFrame;
 import javax.swing.JLabel;
 import javax.swing.JLayeredPane;
 import javax.swing.JPanel;
-import javax.swing.border.EmptyBorder;
-
-import usermanager.User;
-import wetalk.WeTalkDownPart;
-
-import java.awt.Toolkit;
-
-import javax.swing.JButton;
+import javax.swing.JScrollPane;
 import javax.swing.JTextArea;
 import javax.swing.JTextField;
+import javax.swing.border.EmptyBorder;
 
-import java.awt.Color;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
-import javax.swing.JScrollPane;
+import message.MsgInternal;
+import usermanager.User;
+import File.FileSend;
 
-import java.awt.Font;
-import java.awt.event.MouseAdapter;
-import java.awt.event.MouseEvent;
-import java.awt.event.KeyAdapter;
-import java.awt.event.KeyEvent;
-import java.net.DatagramPacket;
-import java.net.DatagramSocket;
-import java.util.Map;
-import java.awt.SystemColor;
+import java.awt.event.WindowAdapter;
+import java.awt.event.WindowEvent;
 
 public class ChatFrameChat extends JFrame {
+	protected static Logger log = 
+			LoggerFactory.getLogger(ChatFrameChat.class);
+	static final int TalkPort = 4567;
+	
 	User ME;
 	User PEER;
-	private Map<String, User> UserStore;
-	int TalkPort;
+	Queue<MsgInternal> MsgInternalQueue;	//所有消息队列
+	Map<String, User> chattingUserStore;	//会话的用户
 	
 	DatagramSocket socket = null;
-	DatagramPacket pkt = null;
 
 	private JPanel contentPane;
 	private JTextField textField;
-	private JTextArea textArea;
+	private volatile JTextArea textArea;
+	private final Action action;
+	
+	private volatile boolean isRunning;		//表示接收线程状态
 
 	/**
 	 * Create the frame.
 	 */
-	public ChatFrameChat(User me, User peer, Map<String, User> userstore) {
-		ME = me;
-		PEER = peer;
-		UserStore = userstore;
+	public ChatFrameChat(User me, User peer, 
+						Queue<MsgInternal> MsgInternalQueue,
+						Map<String, User> chattingUserStore) {
+
+		this.ME = me;
+		this.PEER = peer;
+		this.MsgInternalQueue = MsgInternalQueue;
+		this.chattingUserStore = chattingUserStore;
+		
+		this.action = new SwingAction();
+		this.isRunning = true;
 		
 		try{
 			socket = new DatagramSocket();
@@ -60,6 +83,12 @@ public class ChatFrameChat extends JFrame {
 			e.printStackTrace();			
 		}
 		
+		addWindowListener(new WindowAdapter() {
+			@Override
+			public void windowClosing(WindowEvent e) {
+				chatExit(e);
+			}
+		});
 		setIconImage(Toolkit.getDefaultToolkit().getImage("./wetalk-single/icons/title.png"));	
 		setTitle(peer.getRemark()==null? peer.getName() : peer.getRemark());
 
@@ -124,25 +153,78 @@ public class ChatFrameChat extends JFrame {
 		textArea.setForeground(new Color(0, 0, 102));
 		textArea.setEditable(false);
 		scrollPane.setViewportView(textArea);
+		
+		JButton btnNewButton = new JButton("发送文件");
+		btnNewButton.addMouseListener(new MouseAdapter() {
+			@Override
+			public void mouseClicked(MouseEvent e) {
+				sendFilebutton_event(e);
+			}
+		});
+		btnNewButton.setAction(action);
+		btnNewButton.setBounds(390, 10, 93, 38);
+		layeredPane.add(btnNewButton);
 	}
 	
-	//发送消息事件处理
+	//发送消息（事件驱动）
 	protected void sendButtenEvent(){
 		String payload = textField.getText(); //获得用户名
 		if(payload.compareTo("")!=0 ) {
 			textArea.append(ME.getName()+":"+payload + '\n');
 			textField.setText(null);
 			
-			//TODO 发送给对端
+			//发送给对端		
+			try {				
+				DatagramPacket pkt = new DatagramPacket(payload.getBytes(),payload.getBytes().length,
+														InetAddress.getByName(this.PEER.getIPAddress()),
+														TalkPort);
+				socket.send(pkt);
+			} catch (IOException e) {
+				// TODO Auto-generated catch block
+				e.printStackTrace();
+			}
 		}
 		
 	}
+	//接收消息（新线程轮询）
+	private void working(){
+		Receiver receiver = new Receiver();
+		receiver.start();
+	}
+	private class Receiver extends Thread{
+		public void run(){
+			while(isRunning){
+				if(!MsgInternalQueue.isEmpty()){
+					Iterator<MsgInternal> iterator = MsgInternalQueue.iterator();
+					while(iterator.hasNext()){
+						MsgInternal msg = (MsgInternal)iterator.next();
+						//找出发给自己的消息
+						if(msg.getIP().equals(PEER.getIPAddress())){
+							textArea.append(PEER.getName()+":" + msg.getMsg() + '\n');
+							iterator.remove();
+						}
+					}
+				}
+			}
+			log.info("finifsh chatting receiver.");
+		}
+	}
 	
+	//关闭窗口退出操作
+	private void chatExit(WindowEvent e){
+		chattingUserStore.remove(PEER.getIPAddress());
+		//关闭接收线程
+		this.isRunning = false;
+		log.info("finish chatting with " + PEER.getName());
+	}
+		
 	//显示会话窗口。静态方法
-	public static void showFrameChat(User me,User peer,Map<String, User> userstore) {
+	public static void showFrameChat(User me,User peer,
+								Queue<MsgInternal> MsgInternalQueue,
+								Map<String, User> chattingUserStore) {
 		try {
 			ChatFrameChat framechat;
-			framechat = new ChatFrameChat(me, peer,userstore);
+			framechat = new ChatFrameChat(me, peer, MsgInternalQueue, chattingUserStore);
 			framechat.setDefaultCloseOperation(JFrame.DISPOSE_ON_CLOSE);
 
 			// 把窗口置于中心
@@ -158,10 +240,31 @@ public class ChatFrameChat extends JFrame {
 			frameSize.height) / 2);
 			
 			framechat.setVisible(true);
-		//	framemain.working();
+			framechat.working();
 		} catch (Exception e) {
 			e.printStackTrace();
 		}
 	}
 	
+	//select sendfile
+	void sendFilebutton_event(MouseEvent e){
+		File sendfile = null;
+		JFileChooser chooser = new JFileChooser();//初始化文件选择框
+		chooser.setDialogTitle("请选择文件");//设置文件选择框的标题 
+		int result =chooser.showOpenDialog(null);//弹出选择框
+		if(JFileChooser.APPROVE_OPTION == result){
+			sendfile = chooser.getSelectedFile();
+			FileSend filesender = new FileSend(this.PEER.getIPAddress(), sendfile);
+			filesender.start();
+		}
+	}
+	
+	private class SwingAction extends AbstractAction {
+		public SwingAction() {
+			putValue(NAME, "发送文件");
+			putValue(SHORT_DESCRIPTION, "Some short description");
+		}
+		public void actionPerformed(ActionEvent e) {
+		}
+	}
 }
