@@ -43,6 +43,7 @@ import javax.swing.tree.DefaultTreeModel;
 import javax.swing.tree.MutableTreeNode;
 import javax.swing.tree.TreePath;
 
+import message.GroupChatMessage;
 import message.MsgInternal;
 
 import org.slf4j.Logger;
@@ -52,6 +53,7 @@ import usermanager.User;
 import wetalk.WeTalkDownPart;
 import File.FileReceive;
 import GroupTalk.GroupTalkStart;
+import GroupTalk.groupMessageReceive;
 
 
 public class ChatFrameMain extends JFrame {
@@ -77,6 +79,8 @@ public class ChatFrameMain extends JFrame {
 	Map<String, User> MsgFromPeers;		//用于存放收到被动消息的用户
 	boolean isShowing;
 	
+	static Queue<GroupChatMessage> chatcontent;
+	
     Map<String, User> chattingUserStore;
 	Queue<MsgInternal> MsgInternalQueue;	//用于传递内部聊天消息
 	/**
@@ -91,6 +95,8 @@ public class ChatFrameMain extends JFrame {
 		
 		this.MsgFromPeers = new ConcurrentHashMap<>();
 		this.isShowing = true;
+		
+		this.chatcontent=new ConcurrentLinkedQueue<>();
 		
 		this.chattingUserStore =  new ConcurrentHashMap<>();		
 		this.MsgInternalQueue = new ConcurrentLinkedQueue<>(); 
@@ -187,7 +193,7 @@ public class ChatFrameMain extends JFrame {
 	
 	//建立群组按钮被点击事件处理
 	protected void grouptalkButten(MouseEvent e){
-		GroupTalkStart grouptalk = new GroupTalkStart(UserStore);
+		GroupTalkStart grouptalk = new GroupTalkStart(UserStore,chatcontent,this.ME);
 		threadpool.submit( grouptalk);
 	}
 	
@@ -270,6 +276,14 @@ public class ChatFrameMain extends JFrame {
 		}		
 	}
 	
+	//群聊
+	protected class GroupMessageReceiver extends Thread{
+		public void run(){
+			//创建并发消息队列			 
+			 groupMessageReceive  rec=new groupMessageReceive(chatcontent,ME);
+			 rec.MessageReceive();
+		}
+	}
 
 	//////////////////
 	//维护用户列表
@@ -335,7 +349,7 @@ public class ChatFrameMain extends JFrame {
 				try {
 					ss = new ServerSocket(FILEPORT);
 				} catch (IOException e1) {
-					e1.printStackTrace();
+					log.error("Wrong when build file socket.",e1);
 				}
 				log.info("file server is working.");
 				
@@ -398,6 +412,9 @@ public class ChatFrameMain extends JFrame {
 		
 		Thread fileHandler = new FileHandler();
 		threadpool.submit(fileHandler);
+		
+		Thread groupMessageReceiver = new GroupMessageReceiver();
+		threadpool.submit(groupMessageReceiver);
 		
 		return;
 	}

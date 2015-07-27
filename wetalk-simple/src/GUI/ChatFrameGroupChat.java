@@ -6,24 +6,19 @@ import java.awt.Dimension;
 import java.awt.Font;
 import java.awt.SystemColor;
 import java.awt.Toolkit;
-import java.awt.event.ActionEvent;
 import java.awt.event.KeyAdapter;
 import java.awt.event.KeyEvent;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
-import java.io.File;
+import java.awt.event.WindowAdapter;
+import java.awt.event.WindowEvent;
 import java.io.IOException;
 import java.net.DatagramPacket;
-import java.net.DatagramSocket;
 import java.net.InetAddress;
-import java.util.Iterator;
-import java.util.Map;
+import java.net.MulticastSocket;
 import java.util.Queue;
 
-import javax.swing.AbstractAction;
-import javax.swing.Action;
 import javax.swing.JButton;
-import javax.swing.JFileChooser;
 import javax.swing.JFrame;
 import javax.swing.JLabel;
 import javax.swing.JLayeredPane;
@@ -33,57 +28,45 @@ import javax.swing.JTextArea;
 import javax.swing.JTextField;
 import javax.swing.border.EmptyBorder;
 
+import message.GroupChatMessage;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import message.MsgInternal;
 import usermanager.User;
-import File.FileSend;
 
-import java.awt.event.WindowAdapter;
-import java.awt.event.WindowEvent;
-import java.awt.Window.Type;
-
-public class ChatFrameChat extends JFrame {
+public class ChatFrameGroupChat extends JFrame {
 	protected static Logger log = 
-			LoggerFactory.getLogger(ChatFrameChat.class);
-	static final int TalkPort = 4567;
-	
-	User ME;
-	User PEER;
-	Queue<MsgInternal> MsgInternalQueue;	//所有消息队列
-	Map<String, User> chattingUserStore;	//会话的用户
-	
-	DatagramSocket socket = null;
-
+			LoggerFactory.getLogger(ChatFrameGroupChat.class);
+	boolean isRunning;
 	private JPanel contentPane;
 	private JTextField textField;
 	private volatile JTextArea textArea;
-	private final Action action;
+	int GroupListenPort=5555;
+	String groupName;
+	InetAddress groupIp;
+	User ME;
+	private Queue<GroupChatMessage> chatcontent;
 	
-	private volatile boolean isRunning;		//表示接收线程状态
+	MulticastSocket ms = null;
 
 	/**
 	 * Create the frame.
 	 */
-	public ChatFrameChat(User me, User peer, 
-						Queue<MsgInternal> MsgInternalQueue,
-						Map<String, User> chattingUserStore) {
-		setType(Type.UTILITY);
-
-		this.ME = me;
-		this.PEER = peer;
-		this.MsgInternalQueue = MsgInternalQueue;
-		this.chattingUserStore = chattingUserStore;
+	public ChatFrameGroupChat(String groupName,InetAddress groupIp,User Me,Queue<GroupChatMessage> chatcontent,
+							MulticastSocket ms) {
 		
-		this.action = new SwingAction();
 		this.isRunning = true;
 		
-		try{
-			socket = new DatagramSocket();
-		} catch(Exception e) {
-			e.printStackTrace();			
-		}
+        this.groupIp=groupIp;
+        this.groupName=groupName;
+        this.ME=Me;
+        this.chatcontent=chatcontent;
+		this.ms = ms;
+        
+        setType(Type.UTILITY);
+		setIconImage(Toolkit.getDefaultToolkit().getImage("./icons/title.png"));	
+        setTitle(this.groupName);
 		
 		addWindowListener(new WindowAdapter() {
 			@Override
@@ -91,11 +74,8 @@ public class ChatFrameChat extends JFrame {
 				chatExit(e);
 			}
 		});
-		setIconImage(Toolkit.getDefaultToolkit().getImage("./icons/title.png"));	
-		setTitle(peer.getRemark()==null? peer.getName() : peer.getRemark());
-
 		setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
-		setBounds(100, 100, 509, 479);
+		setBounds(100, 100, 502, 677);
 		contentPane = new JPanel();
 		contentPane.setBorder(new EmptyBorder(5, 5, 5, 5));
 		contentPane.setLayout(new BorderLayout(0, 0));
@@ -110,7 +90,7 @@ public class ChatFrameChat extends JFrame {
 		backgroundLabel.setBackground(SystemColor.inactiveCaption);
 		backgroundLabel.setFont(new Font("宋体", Font.PLAIN, 14));
 		backgroundLabel.setForeground(SystemColor.inactiveCaption);
-		backgroundLabel.setBounds(0, 0, 483, 431);
+		backgroundLabel.setBounds(0, 0, 483, 631);
 		layeredPane.add(backgroundLabel);
 		
 		JButton sendButton = new JButton("发送");
@@ -123,7 +103,7 @@ public class ChatFrameChat extends JFrame {
 			}
 		});
 		sendButton.setFont(new Font("宋体", Font.BOLD, 16));
-		sendButton.setBounds(390, 383, 83, 38);
+		sendButton.setBounds(390, 593, 83, 38);
 		layeredPane.add(sendButton);
 		
 		textField = new JTextField();
@@ -140,13 +120,13 @@ public class ChatFrameChat extends JFrame {
 		});
 		textField.setForeground(new Color(153, 0, 0));
 		textField.setBackground(SystemColor.inactiveCaption);
-		textField.setBounds(0, 352, 380, 69);
+		textField.setBounds(0, 562, 380, 69);
 		layeredPane.add(textField);
 		textField.setColumns(10);
 		textField.setHorizontalAlignment(JTextField.LEFT);
 		
 		JScrollPane scrollPane = new JScrollPane();
-		scrollPane.setBounds(0, 0, 380, 342);
+		scrollPane.setBounds(0, 0, 380, 552);
 		layeredPane.add(scrollPane);
 		
 		textArea = new JTextArea();
@@ -154,79 +134,81 @@ public class ChatFrameChat extends JFrame {
 		textArea.setFont(new Font("宋体", Font.PLAIN, 20));
 		textArea.setForeground(new Color(0, 0, 102));
 		textArea.setEditable(false);
-		scrollPane.setViewportView(textArea);
+		scrollPane.setViewportView(textArea);		
+	}
+	
+	//显示收到的消息
+	private class MessageReceive extends Thread{
+		public void run(){
+			while(isRunning){
+				while(!chatcontent.isEmpty()){
+					GroupChatMessage recvmsg = chatcontent.poll();
+					if(recvmsg.getGroupIp().equals(groupIp)){
+						switch(recvmsg.getType()){
+						case GroupChatMessage.BUILD_GROUP_MESSAGE:		
+							break;
+						case GroupChatMessage.JION_GROUP_MESSAGE:
+							break;
+						case GroupChatMessage.LEAVE_GROUP_MESSAGE:
+							break;
+							//消息生产者
+						case GroupChatMessage.CHATING_GROUP_MESSAGE:
+							textArea.append(recvmsg.getContent()+ '\n');	//显示消息
+							break;
+							//前端界面线程调用队列中消息并显示
+						default:
+							break;
+						}
 		
-		JButton btnNewButton = new JButton("发送文件");
-		btnNewButton.addMouseListener(new MouseAdapter() {
-			@Override
-			public void mouseClicked(MouseEvent e) {
-				sendFilebutton_event(e);
+					}
+				}
 			}
-		});
-		btnNewButton.setAction(action);
-		btnNewButton.setBounds(390, 10, 93, 38);
-		layeredPane.add(btnNewButton);
+			log.info("finish group talk's receive.");
+		}
 	}
 	
 	//发送消息（事件驱动）
 	protected void sendButtenEvent(){
 		String payload = textField.getText(); //获得用户名
+		//判断发送消息是否为空
 		if(payload.compareTo("")!=0 ) {
-			textArea.append(ME.getName()+":"+payload + '\n');
-			textField.setText(null);
 			
-			//发送给对端		
+			textArea.append(this.ME.getName()+':' + payload + '\n');	//显示消息
+			
+			textField.setText(null);//发送框清空
+			//构造消息数据报
+			GroupChatMessage content=new GroupChatMessage( GroupChatMessage.CHATING_GROUP_MESSAGE ,this.GroupListenPort ,this.groupIp, this.groupName,this.ME.getName()+':'+payload);
 			try {				
-				DatagramPacket pkt = new DatagramPacket(payload.getBytes(),payload.getBytes().length,
-														InetAddress.getByName(this.PEER.getIPAddress()),
-														TalkPort);
-				socket.send(pkt);
+			    byte send[]=content.srialize();
+			    DatagramPacket pkt=new DatagramPacket(send,send.length,groupIp,GroupListenPort);
+			    ms.send(pkt);
 			} catch (IOException e) {
-				// TODO Auto-generated catch block
-				e.printStackTrace();
+				log.error("Wrong when seng multicast message.");
 			}
+				
 		}
 		
 	}
-	//接收消息（新线程轮询）
+
 	private void working(){
-		Receiver receiver = new Receiver();
+		MessageReceive receiver = new MessageReceive();
 		receiver.start();
-	}
-	private class Receiver extends Thread{
-		public void run(){
-			while(isRunning){
-				if(!MsgInternalQueue.isEmpty()){
-					Iterator<MsgInternal> iterator = MsgInternalQueue.iterator();
-					while(iterator.hasNext()){
-						MsgInternal msg = (MsgInternal)iterator.next();
-						//找出发给自己的消息
-						if(msg.getIP().equals(PEER.getIPAddress())){
-							textArea.append(PEER.getName()+":" + msg.getMsg() + '\n');
-							iterator.remove();
-						}
-					}
-				}
-			}
-			log.info("finifsh chatting receiver.");
-		}
-	}
+	}	
 	
 	//关闭窗口退出操作
 	private void chatExit(WindowEvent e){
-		chattingUserStore.remove(PEER.getIPAddress());
-		//关闭接收线程
-		this.isRunning = false;
-		log.info("finish chatting with " + PEER.getName());
+		isRunning = false;
+		if(ms !=null) ms.close();
+		log.info("finish group talk.");
 	}
-		
+	
+	
 	//显示会话窗口。静态方法
-	public static void showFrameChat(User me,User peer,
-								Queue<MsgInternal> MsgInternalQueue,
-								Map<String, User> chattingUserStore) {
+	public static void showFrameChat(String groupName,InetAddress groupIp,User Me,Queue<GroupChatMessage> chatcontent,
+						MulticastSocket ms) {
 		try {
-			ChatFrameChat framechat;
-			framechat = new ChatFrameChat(me, peer, MsgInternalQueue, chattingUserStore);
+			ChatFrameGroupChat framechat;
+			framechat = new ChatFrameGroupChat(groupName,groupIp,Me,chatcontent,ms);
 			framechat.setDefaultCloseOperation(JFrame.DISPOSE_ON_CLOSE);
 
 			// 把窗口置于中心
@@ -242,31 +224,9 @@ public class ChatFrameChat extends JFrame {
 			frameSize.height) / 2);
 			
 			framechat.setVisible(true);
-			framechat.working();
+			framechat.working();		 
 		} catch (Exception e) {
 			e.printStackTrace();
-		}
-	}
-	
-	//select sendfile
-	void sendFilebutton_event(MouseEvent e){
-		File sendfile = null;
-		JFileChooser chooser = new JFileChooser();//初始化文件选择框
-		chooser.setDialogTitle("请选择文件");//设置文件选择框的标题 
-		int result =chooser.showOpenDialog(null);//弹出选择框
-		if(JFileChooser.APPROVE_OPTION == result){
-			sendfile = chooser.getSelectedFile();
-			FileSend filesender = new FileSend(this.PEER.getIPAddress(), sendfile);
-			filesender.start();
-		}
-	}
-	
-	private class SwingAction extends AbstractAction {
-		public SwingAction() {
-			putValue(NAME, "发送文件");
-			putValue(SHORT_DESCRIPTION, "Some short description");
-		}
-		public void actionPerformed(ActionEvent e) {
 		}
 	}
 }
